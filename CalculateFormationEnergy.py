@@ -141,13 +141,15 @@ def write_to_data_file(formation_energies, imbalanced_species_list, pristine_spe
 			output_file.write("begin{data}\n")
 			for formation_energy in formation_energies:
 				output_file.write(f"{formation_energy.supercell_size}, {formation_energy.rich_eV}\n")
-			output_file.write(f"Dilute, {c_rich}\n")
+			if c_rich:
+				output_file.write(f"Dilute, {c_rich}\n")
 		else:
 			output_file.write(f"Supercell Size, Formation Energy in {formation_energies[0].leanrich_species_name}-rich limit (eV), Formation Energy in {formation_energies[0].leanrich_species_name}-lean limit (eV)\n")
 			output_file.write("begin{data}\n")
 			for formation_energy in formation_energies:
 				output_file.write(f"{formation_energy.supercell_size}, {formation_energy.rich_eV}, {formation_energy.lean_eV}\n")
-			output_file.write(f"Dilute, {c_rich}, {c_lean}\n")
+			if c_rich and c_lean:
+				output_file.write(f"Dilute, {c_rich}, {c_lean}\n")
 		output_file.write("end{data}\n")
 	print(f"Data written to {os.path.join(os.getcwd(), output_file_name)}")
 
@@ -160,7 +162,9 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 	axis_inverseSupercellSize_rich_formationEnergy.scatter([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.rich_eV for formation_energy in formation_energies], color="#1f77b4", marker='x', s=140)
 
 	# Add regression line
-	axis_inverseSupercellSize_rich_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_rich * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_rich, color='black', label=f'Linear Regression\n$y$ = {m_rich:.4f}$x$ + {c_rich:.4f} eV')
+	if m_rich and c_rich:
+		axis_inverseSupercellSize_rich_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_rich * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_rich, color='black', label=f'Linear Regression\n$y$ = {m_rich:.4f}$x$ + {c_rich:.4f} eV')
+	
 	axis_inverseSupercellSize_rich_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
 	axis_inverseSupercellSize_rich_formationEnergy.set_ylabel('Formation Energy (eV)', fontsize=24)
 	axis_inverseSupercellSize_rich_formationEnergy.yaxis.set_tick_params(labelsize=24)
@@ -176,9 +180,11 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 	if formation_energies[0].leanrich_species_name != "placeholder name":
 		fig_inverseSupercellSize_lean_formationEnergy, axis_inverseSupercellSize_lean_formationEnergy = plt.subplots(figsize=(12,10)) # values are in inches, default is 6.4,4.8
 		axis_inverseSupercellSize_lean_formationEnergy.scatter([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.lean_eV for formation_energy in formation_energies], color="#1f77b4", marker='x', s=140)
-
+		
 		# Add regression line
-		axis_inverseSupercellSize_lean_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_lean * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_lean, color='black', label=f'Linear Regression\n$y$ = {m_lean:.4f}$x$ + {c_lean:.4f} eV')
+		if m_lean and c_lean:
+			axis_inverseSupercellSize_lean_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_lean * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_lean, color='black', label=f'Linear Regression\n$y$ = {m_lean:.4f}$x$ + {c_lean:.4f} eV')
+		
 		axis_inverseSupercellSize_lean_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
 		axis_inverseSupercellSize_lean_formationEnergy.set_ylabel('Formation Energy (eV)', fontsize=24)
 		axis_inverseSupercellSize_lean_formationEnergy.yaxis.set_tick_params(labelsize=24)
@@ -323,11 +329,14 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 	
 	formation_energies.append(formation_energy)
 
-# fit linear for formation energies as a function of inverse supercell sizes
-for formation_energy in formation_energies:
-	formation_energy.inverse_supercell_size = (formation_energy.supercell_size)**(-1)
-m_rich, c_rich = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.rich_eV for formation_energy in formation_energies], 1) 
-m_lean, c_lean = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.lean_eV for formation_energy in formation_energies], 1) 
+if len(formation_energies) > 1:
+	# fit linear for formation energies as a function of inverse supercell sizes
+	for formation_energy in formation_energies:
+		formation_energy.inverse_supercell_size = (formation_energy.supercell_size)**(-1)
+	m_rich, c_rich = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.rich_eV for formation_energy in formation_energies], 1) 
+	m_lean, c_lean = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.lean_eV for formation_energy in formation_energies], 1)
+else:
+	m_rich, c_rich, m_lean, c_lean = None, None, None, None
 
 formation_energies.sort(key=lambda formation_energy: formation_energy.supercell_size)
 write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean)
