@@ -122,7 +122,7 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 
 	return pristine_species_list, defective_species_list
 
-def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge):
+def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge, electron_chemical_potential_relative_to_VBM_eV):
 	output_file_name = "formation_energy_data_file"
 	with open(output_file_name, "w") as output_file:
 		output_file.write("begin{defect_description}\n")
@@ -141,6 +141,8 @@ def write_to_data_file(formation_energies, imbalanced_species_list, pristine_spe
 				output_file.write(f"{imbalanced_species.name} ({formation_energies[0].leanrich_species_name}-lean) = {imbalanced_species.chemical_potential_lean_eV}\n")
 		for pristine_species in pristine_species_for_lean_calculation_list:
 			output_file.write(f"{pristine_species.name} = {pristine_species.chemical_potential_rich_eV}\n")
+		if defective_net_charge:
+			output_file.write(f"electron = E_VBM(pristine,supercell) + {electron_chemical_potential_relative_to_VBM_eV}\n")
 		output_file.write("end{chemical_potentials}\n")
 		output_file.write("\n")
 		if formation_energies[0].leanrich_species_name == "placeholder name": # this occurs when there is no rich-lean dependence
@@ -384,6 +386,6 @@ else:
 	m_rich, c_rich, m_lean, c_lean = None, None, None, None
 
 formation_energies.sort(key=lambda formation_energy: formation_energy.supercell_size)
-write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge)
+write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge, args.electron_chemical_potential_relative_to_VBM_eV)
 plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean)
 
