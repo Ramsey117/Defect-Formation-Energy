@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import argparse
-from Tools.AIMPROIOTools import get_output_file_name, get_final_energy, find_pristine_directory, count_atoms
+from Tools.AIMPROIOTools import get_output_file_name, get_final_energy, find_pristine_directory, count_atoms, get_net_charge, get_bandstructure_eV
 from Tools.consts import EV_PER_AU
 
 class Species:
@@ -122,12 +122,14 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 
 	return pristine_species_list, defective_species_list
 
-def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean):
+def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge):
 	output_file_name = "formation_energy_data_file"
 	with open(output_file_name, "w") as output_file:
 		output_file.write("begin{defect_description}\n")
 		for imbalanced_species in imbalanced_species_list:
 			output_file.write(f"{imbalanced_species.name} : {imbalanced_species.count}\n")
+		if defective_net_charge:
+			output_file.write(f"Defective net charge : {defective_net_charge}\n")
 		output_file.write("end{defect_description}\n")
 		output_file.write("\n")
 		output_file.write("begin{chemical_potentials}[eV]\n")
@@ -201,18 +203,22 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 parser = argparse.ArgumentParser(description="Calculate formation energy of the defect in the pwd.")
 parser.add_argument("--pristine_directories_path", "-pristinePath", type=str, default=None,
                     help="=Specify the path to the directory where the different pristine cell size directories are held. If left blank, the default calculation will be located.")
-# THESE ARE NOT IMPLEMENTED YET
-#parser.add_argument("--one_shot_flag", "-oneShot", action="store_true",  # Becomes True if specified, otherwise False
-                    #help="Swap to just a single calculation of formation energy.")
+parser.add_argument("--electron_chemical_potential_relative_to_VBM_eV", "-mu_e", type=float, default=0.0,
+                    help="=Specify the electron chemical potential for calculation of charged defect formation energies relative to the pristine valence band maximum. Units eV.")
+parser.add_argument("dirs",nargs="*",
+                    help="List of directory paths (optional).")
 
 
 args = parser.parse_args()
 
 pwd = os.getcwd()
-defective_supercell_relative_directories = [
-	d for d in os.listdir(pwd)
-	if os.path.isdir(os.path.join(pwd, d)) and re.fullmatch(r"\d+x\d+", d)
-]
+if args.dirs:
+	defective_supercell_relative_directories = args.dirs
+else:
+	defective_supercell_relative_directories = [
+		d for d in os.listdir(pwd)
+		if os.path.isdir(os.path.join(pwd, d)) and re.fullmatch(r"\d+x\d+", d)
+	]
 
 print(defective_supercell_relative_directories)
 if not args.pristine_directories_path:
@@ -222,6 +228,8 @@ else:
 
 
 formation_energies = []
+defective_net_charge = None # initialise this as None in order to check if it has been set properly
+imbalanced_species_list = None # same for this
 
 for defective_supercell_relative_directory in defective_supercell_relative_directories:
 	formation_energy = FormationEnergy("placeholder name")
@@ -233,21 +241,32 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 	else:
 		raise ValueError("Incorrectly formatted supercell directory. No /nxn/")
 
-	# Get Pristine Energy
-	pristine_output_file_name = get_output_file_name(pristine_directory_path)
-	pristine_output_file_path = os.path.join(pristine_directory_path, pristine_output_file_name)
-	pristine_energy_eV = get_final_energy(pristine_output_file_path) * EV_PER_AU
-	
 	# Get Defective Energy
 	defective_supercell_absolute_directory_path = os.path.abspath(defective_supercell_relative_directory)
 	defective_output_file_name = get_output_file_name(defective_supercell_absolute_directory_path)
 	defective_output_file_path = os.path.join(defective_supercell_absolute_directory_path, defective_output_file_name)
 	defective_energy_eV = get_final_energy(defective_output_file_path) * EV_PER_AU
+	this_cell_defective_net_charge = get_net_charge(defective_output_file_path)
+	
+	# Check net charge is consistent to the first dir.
+	if defective_net_charge is None:
+		defective_net_charge = this_cell_defective_net_charge # this makes sure it is only set once
+	elif this_cell_defective_net_charge != defective_net_charge:
+		raise ValueError(f"Inconsistent charge: expected {defective_net_charge}, got {this_cell_defective_net_charge} in dir {defective_supercell_relative_directory}.")
+	
+	# Get Pristine Energy
+	pristine_output_file_name = get_output_file_name(pristine_directory_path)
+	pristine_output_file_path = os.path.join(pristine_directory_path, pristine_output_file_name)
+	pristine_energy_eV = get_final_energy(pristine_output_file_path) * EV_PER_AU
+	if defective_net_charge:
+		pristine_bandstructure_dir_path = os.path.join(pristine_directories_path, "Bandstructure", "ByPath", "GKMG", defective_supercell_relative_directory)
+		pristine_bandstructure_output_file_path = os.path.join(pristine_bandstructure_dir_path, get_output_file_name(pristine_bandstructure_dir_path))
+		pristine_VBM_eV = get_bandstructure_eV(pristine_bandstructure_output_file_path, "VBM")
 	
 	pristine_species_list, defective_species_list = get_pristine_and_defective_species_lists(pristine_output_file_path, defective_output_file_path)
 
 	# Identify differences in numbers of species 
-	imbalanced_species_list = []
+	this_imbalanced_species_list = []
 	for defective_species in defective_species_list:
 		for pristine_species in pristine_species_list:
 			if defective_species.name == pristine_species.name:
@@ -256,10 +275,26 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 		if species_difference != 0:
 			imbalanced_species = Species(defective_species.name)
 			imbalanced_species.count = species_difference
-			imbalanced_species_list.append(imbalanced_species)
-	print("Imbalanced species:")
-	for species in imbalanced_species_list:
-		species.print_species()
+			this_imbalanced_species_list.append(imbalanced_species)
+	
+	# Check to see if the defects are consistent to the first parsed directory.
+	if imbalanced_species_list is None:
+		imbalanced_species_list = this_imbalanced_species_list
+	else:
+		for set_species in imbalanced_species_list:
+			same_imbalance_identified = False
+			for species in this_imbalanced_species_list:
+				if species.name != set_species.name:
+					if species.name not in [s.name for s in imbalanced_species_list]:
+						raise ValueError(f"Mismatch of unbalanced species: {species.name} unbalanced in dir {defective_supercell_relative_directory} when not expected.")
+					continue
+				if species.count == set_species.count:
+					same_imbalance_identified = True
+				else:
+					raise ValueError(f"Inconsistent number of imbalanced species: expected {set_species.count}, got {species.count} for {species.name} in dir {defective_supercell_relative_directory}.")
+			if not same_imbalance_identified:
+				raise ValueError(f"Could not find imbalance of {set_species.name} in dir {defective_supercell_relative_directory}.")
+	
 	
 	# Now get the corresponding chemical potentials. This is only for the rich conditions. Lean is calculated later
 	for imbalanced_species in imbalanced_species_list:
@@ -314,23 +349,28 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 			imbalanced_species.chemical_potential_lean_eV = imbalanced_species_lean_chemical_potential_eV/lean_species_count
 	
 	# Calculate formation energies
-	# Calculate rich correction
-	species_correction_rich_eV = 0.0
-	for imbalanced_species in imbalanced_species_list:
-		if imbalanced_species.chemical_potential_eV != 0.0:
-			species_correction_rich_eV += imbalanced_species.chemical_potential_eV * imbalanced_species.count
-		elif imbalanced_species.chemical_potential_rich_eV != 0.0:
-			species_correction_rich_eV += imbalanced_species.chemical_potential_rich_eV * imbalanced_species.count
-	formation_energy.rich_eV = defective_energy_eV - pristine_energy_eV - species_correction_rich_eV
+	if defective_net_charge:
+		electronic_contribution_eV = defective_net_charge*(args.electron_chemical_potential_relative_to_VBM_eV + pristine_VBM_eV)
+	else:
+		electronic_contribution_eV = 0.0
 	
-	# Calculate lean correction
-	species_correction_lean_eV = 0.0
+	# Calculate rich
+	species_contribution_rich_eV = 0.0
 	for imbalanced_species in imbalanced_species_list:
 		if imbalanced_species.chemical_potential_eV != 0.0:
-			species_correction_lean_eV += imbalanced_species.chemical_potential_eV * imbalanced_species.count
+			species_contribution_rich_eV += imbalanced_species.chemical_potential_eV * imbalanced_species.count
+		elif imbalanced_species.chemical_potential_rich_eV != 0.0:
+			species_contribution_rich_eV += imbalanced_species.chemical_potential_rich_eV * imbalanced_species.count
+	formation_energy.rich_eV = defective_energy_eV - pristine_energy_eV - species_contribution_rich_eV + electronic_contribution_eV
+	
+	# Calculate lean
+	species_contribution_lean_eV = 0.0
+	for imbalanced_species in imbalanced_species_list:
+		if imbalanced_species.chemical_potential_eV != 0.0:
+			species_contribution_lean_eV += imbalanced_species.chemical_potential_eV * imbalanced_species.count
 		elif imbalanced_species.chemical_potential_lean_eV != 0.0:
-			species_correction_lean_eV += imbalanced_species.chemical_potential_lean_eV * imbalanced_species.count
-	formation_energy.lean_eV = defective_energy_eV - pristine_energy_eV - species_correction_lean_eV
+			species_contribution_lean_eV += imbalanced_species.chemical_potential_lean_eV * imbalanced_species.count
+	formation_energy.lean_eV = defective_energy_eV - pristine_energy_eV - species_contribution_lean_eV + electronic_contribution_eV
 	
 	formation_energies.append(formation_energy)
 
@@ -344,6 +384,6 @@ else:
 	m_rich, c_rich, m_lean, c_lean = None, None, None, None
 
 formation_energies.sort(key=lambda formation_energy: formation_energy.supercell_size)
-write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean)
+write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge)
 plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean)
 
