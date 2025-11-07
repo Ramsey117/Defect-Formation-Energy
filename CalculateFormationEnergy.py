@@ -125,6 +125,11 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean):
 	output_file_name = "formation_energy_data_file"
 	with open(output_file_name, "w") as output_file:
+		output_file.write("begin{defect_description}\n")
+		for imbalanced_species in imbalanced_species_list:
+			output_file.write(f"{imbalanced_species.name} : {imbalanced_species.count}\n")
+		output_file.write("end{defect_description}\n")
+		output_file.write("\n")
 		output_file.write("begin{chemical_potentials}[eV]\n")
 		for imbalanced_species in imbalanced_species_list:
 			if imbalanced_species.chemical_potential_eV != 0.0:
