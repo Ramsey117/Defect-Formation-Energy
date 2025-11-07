@@ -5,10 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import argparse
-from AIMPROIOTools import get_output_file_name, get_final_energy, find_pristine_directory, count_atoms
-
-global EV_PER_AU
-EV_PER_AU = 27.211386245988
+from Tools.AIMPROIOTools import get_output_file_name, get_final_energy, find_pristine_directory, count_atoms
+from Tools.consts import EV_PER_AU
 
 class Species:
 	# Class to define a species in the system defined in the object name.
@@ -100,6 +98,7 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 	defective_species_list = get_species(defective_output_file_path)
 
 	# In general, the defective species list may contain more species than the pristine, or indeed vice versa in the most general case. Therefore the species lists should be compared against each other and the missing species should be added with a count of zero
+	# Look through defective species to see if they are in the pristine system
 	for defective_species in defective_species_list:
 		is_defective_species_in_pristine_species_list = False
 		for pristine_species in pristine_species_list:
@@ -109,7 +108,8 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 		if not is_defective_species_in_pristine_species_list:
 			new_species = Species(defective_species.name, species_index=len(pristine_species_list) + 1)
 			pristine_species_list.append(new_species)
-
+	
+	# Look through pristine species to see if they are in the defective system
 	for pristine_species in pristine_species_list:
 		is_pristine_species_in_defective_species_list = False
 		for defective_species in defective_species_list:
@@ -161,13 +161,6 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 
 	# Add regression line
 	axis_inverseSupercellSize_rich_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_rich * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_rich, color='black', label=f'Linear Regression\n$y$ = {m_rich:.4f}$x$ + {c_rich:.4f} eV')
-	"""
-	default settings should suffice here. Otherwise these parameters must be edited each time the script is ran.
-	axis_inverseSupercellSize_rich_formationEnergy.xaxis.set_major_locator(ticker.MultipleLocator(0.05))
-	axis_inverseSupercellSize_rich_formationEnergy.yaxis.set_major_locator(ticker.MultipleLocator(0.01))
-	axis_inverseSupercellSize_rich_formationEnergy.xaxis.set_minor_locator(ticker.MultipleLocator(0.01))
-	axis_inverseSupercellSize_rich_formationEnergy.yaxis.set_minor_locator(ticker.MultipleLocator(0.002))
-	"""
 	axis_inverseSupercellSize_rich_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
 	axis_inverseSupercellSize_rich_formationEnergy.set_ylabel('Formation Energy (eV)', fontsize=24)
 	axis_inverseSupercellSize_rich_formationEnergy.yaxis.set_tick_params(labelsize=24)
@@ -186,12 +179,6 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 
 		# Add regression line
 		axis_inverseSupercellSize_lean_formationEnergy.plot([formation_energy.inverse_supercell_size for formation_energy in formation_energies], m_lean * np.array([formation_energy.inverse_supercell_size for formation_energy in formation_energies]) + c_lean, color='black', label=f'Linear Regression\n$y$ = {m_lean:.4f}$x$ + {c_lean:.4f} eV')
-		"""
-		axis_inverseSupercellSize_lean_formationEnergy.xaxis.set_major_locator(ticker.MultipleLocator(0.05))
-		axis_inverseSupercellSize_lean_formationEnergy.yaxis.set_major_locator(ticker.MultipleLocator(0.01))
-		axis_inverseSupercellSize_lean_formationEnergy.xaxis.set_minor_locator(ticker.MultipleLocator(0.01))
-		axis_inverseSupercellSize_lean_formationEnergy.yaxis.set_minor_locator(ticker.MultipleLocator(0.002))
-		"""
 		axis_inverseSupercellSize_lean_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
 		axis_inverseSupercellSize_lean_formationEnergy.set_ylabel('Formation Energy (eV)', fontsize=24)
 		axis_inverseSupercellSize_lean_formationEnergy.yaxis.set_tick_params(labelsize=24)
