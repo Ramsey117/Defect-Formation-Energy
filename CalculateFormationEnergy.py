@@ -188,8 +188,6 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 		fig_inverseSupercellSize_lean_formationEnergy.savefig(f'inverseSupercellSize_{formation_energies[0].leanrich_species_name}_lean_formationEnergy', bbox_inches='tight')
 
 parser = argparse.ArgumentParser(description="Calculate formation energy of the defect in the pwd.")
-parser.add_argument("--moc", "-moc", action="store_true",  # Becomes True if specified, otherwise False
-                    help="Swap to MoC for carbon chemical potential.")
 parser.add_argument("--pristine_directories_path", "-pristinePath", type=str, default=None,
                     help="=Specify the path to the directory where the different pristine cell size directories are held. If left blank, the default calculation will be located.")
 # THESE ARE NOT IMPLEMENTED YET
@@ -303,36 +301,6 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 				pristine_species_for_lean_calculation_list.append(pristine_species_for_lean_calculation)
 				imbalanced_species_lean_chemical_potential_eV -= pristine_species_for_lean_calculation.chemical_potential_rich_eV * pristine_primitive_species.count
 			imbalanced_species.chemical_potential_lean_eV = imbalanced_species_lean_chemical_potential_eV/lean_species_count
-	
-	"""
-	print("Imbalanced species:")
-	for imbalanced_species in imbalanced_species_list:
-		imbalanced_species.print_species()
-	print("\n")
-	"""
-	
-	# Change to MoC chemical potential for carbon
-	if args.moc:
-		moc_directory_path = "/home/c2047921/MoC/Bulk/Gamma/RoughInitialCalc"
-		moc_energy_eV = EV_PER_AU * get_final_energy(os.path.join(moc_directory_path, get_output_file_name(moc_directory_path)))
-		mo_chem_pot_Mo_rich_eV = 0.0
-		mo_chem_pot_Mo_lean_eV = 0.0
-		# check to see if Mo chemical potentials have been calculated
-		have_mo_chem_pots_been_calc = False
-		for species in imbalanced_species:
-			if species.name == "Mo":
-				if formation_energy.leanrich_species_name == "Mo":
-					mo_chem_pot_Mo_rich_eV = species.chemical_potential_rich_eV
-					mo_chem_pot_Mo_lean_eV = species.chemical_potential_lean_eV
-				have_mo_chem_pots_been_calc = True
-		
-		if not have_mo_chem_pots_been_calc:
-			pass
-		for i in imbalanced_species:
-			if i.name == "C":
-				
-				pass
-				#for j in 
 	
 	# Calculate formation energies
 	# Calculate rich correction
