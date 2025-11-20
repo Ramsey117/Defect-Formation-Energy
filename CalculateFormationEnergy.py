@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import argparse
+import subprocess
 from Tools.AIMPROIOTools import get_output_file_name, get_final_energy, find_pristine_directory, count_atoms, get_net_charge, get_bandstructure_eV
 from Tools.consts import EV_PER_AU
 
@@ -33,6 +34,14 @@ class FormationEnergy:
 		self.leanrich_species_name = species_name # name of the species which is leanrich_species_name rich / lean
 		self.rich_eV = 0.0 # formation energy in the leanrich_species_name rich condition
 		self.lean_eV = 0.0 # formation energy in the leanrich_species_name lean condition
+		self.correction_eV = 0.0 # electrostatic correction term. Set if args.include_FNV_correction
+		self.corrected_rich_eV = 0.0
+		self.corrected_lean_eV = 0.0
+	
+	def calculate_corrected_formation_energies(self):
+		self.corrected_rich_eV = self.rich_eV + self.correction_eV
+		if self.leanrich_species_name != "placeholder name":
+			self.corrected_lean_eV = self.lean_eV + self.correction_eV
 
 def get_species(output_file_path):
 	"""
@@ -122,7 +131,38 @@ def get_pristine_and_defective_species_lists(pristine_output_file_path, defectiv
 
 	return pristine_species_list, defective_species_list
 
-def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge, electron_chemical_potential_relative_to_VBM_eV):
+def calculate_correction(dir, formation_energy):
+	def get_command(lines):
+		inside = False
+		for line in lines:
+			line = line.strip()
+			if line == "begin{final_command}":
+				inside = True
+				continue
+			elif line == "end{final_command}" and inside:
+				break
+			if inside:
+				return line
+		return ""
+
+	command_file_path = os.path.join(os.path.abspath(dir), "command")
+	if os.path.isfile(command_file_path): # command file exists
+		initial_dir = os.getcwd()
+		os.chdir(dir)
+		with open(command_file_path, 'r') as f:
+			lines = f.readlines()
+		command = get_command(lines)
+		result = subprocess.run(command, shell=True, text=True,capture_output=True)
+		match = re.search(r"iso - periodic energy\s*=\s*([+-]?\d*\.\d+)", result.stdout)
+		if match:
+			correction_eV = float(match.group(1))
+			formation_energy.correction_eV = correction_eV
+		else:
+			raise ValueError(f"Could not find 'iso - periodic energy' in command output at dir {dir}")
+		os.chdir(initial_dir)
+	return formation_energy
+
+def write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, c_rich_corrected, c_lean_corrected, defective_net_charge, electron_chemical_potential_relative_to_VBM_eV, include_FNV_correction):
 	output_file_name = "formation_energy_data_file"
 	with open(output_file_name, "w") as output_file:
 		output_file.write("begin{defect_description}\n")
@@ -160,9 +200,29 @@ def write_to_data_file(formation_energies, imbalanced_species_list, pristine_spe
 			if c_rich and c_lean:
 				output_file.write(f"Dilute, {c_rich}, {c_lean}\n")
 		output_file.write("end{data}\n")
+		if include_FNV_correction:
+			output_file.write("\n")
+			if formation_energies[0].leanrich_species_name == "placeholder name": # this occurs when there is no rich-lean dependence
+				output_file.write(f"Supercell Size, Correction (eV), Formation Energy (eV)\n")
+				output_file.write("begin{corrected_data}\n")
+				for formation_energy in formation_energies:
+					if formation_energy.correction_eV != 0.0:
+						output_file.write(f"{formation_energy.supercell_size}, {formation_energy.correction_eV}, {formation_energy.corrected_rich_eV}\n")
+				if c_rich_corrected:
+					output_file.write(f"Dilute, N/A, {c_rich_corrected}\n")
+				output_file.write("end{corrected_data}\n")
+			else:
+				output_file.write(f"Supercell Size, Correction (eV), Formation Energy in {formation_energies[0].leanrich_species_name}-rich limit (eV), Formation Energy in {formation_energies[0].leanrich_species_name}-lean limit (eV)\n")
+				output_file.write("begin{corrected_data}\n")
+				for formation_energy in formation_energies:
+					if formation_energy.correction_eV != 0.0:
+						output_file.write(f"{formation_energy.supercell_size}, {formation_energy.correction_eV}, {formation_energy.corrected_rich_eV}, {formation_energy.corrected_lean_eV}\n")
+				if c_rich_corrected and c_lean_corrected:
+					output_file.write(f"Dilute, N/A, {c_rich_corrected}, {c_lean_corrected}\n")
+				output_file.write("end{corrected_data}\n")
 	print(f"Data written to {os.path.join(os.getcwd(), output_file_name)}")
 
-def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
+def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean, m_rich_corrected, m_lean_corrected, c_rich_corrected, c_lean_corrected, include_FNV_correction):
 	plt.rcParams['text.usetex'] = True
 	plt.rcParams['font.family'] = 'serif'
 
@@ -201,14 +261,57 @@ def plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean):
 
 		axis_inverseSupercellSize_lean_formationEnergy.legend(fontsize=24)
 		fig_inverseSupercellSize_lean_formationEnergy.savefig(f'inverseSupercellSize_{formation_energies[0].leanrich_species_name}_lean_formationEnergy', bbox_inches='tight')
+	
+	if include_FNV_correction:
+		# RICH GRAPH
+		corrected_inverse_supercell_sizes = [formation_energy.inverse_supercell_size for formation_energy in formation_energies if formation_energy.correction_eV != 0.0]
+		corrected_formation_energies_rich_eV = [formation_energy.corrected_rich_eV for formation_energy in formation_energies if formation_energy.correction_eV != 0.0]
+		if len(corrected_inverse_supercell_sizes) > 1:
+			fig_inverseSupercellSize_rich_formationEnergy, axis_inverseSupercellSize_rich_formationEnergy = plt.subplots(figsize=(12,10)) # values are in inches, default is 6.4,4.8
+			axis_inverseSupercellSize_rich_formationEnergy.scatter(corrected_inverse_supercell_sizes, corrected_formation_energies_rich_eV, color="#1f77b4", marker='x', s=140)
+
+			# Add regression line
+			if m_rich_corrected and c_rich_corrected:
+				axis_inverseSupercellSize_rich_formationEnergy.plot(corrected_inverse_supercell_sizes, m_rich_corrected * np.array(corrected_inverse_supercell_sizes) + c_rich_corrected, color='black', label=f'Linear Regression\n$y$ = {m_rich_corrected:.4f}$x$ + {c_rich_corrected:.4f} eV')
+			
+			axis_inverseSupercellSize_rich_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
+			axis_inverseSupercellSize_rich_formationEnergy.set_ylabel('Corrected Formation Energy (eV)', fontsize=24)
+			axis_inverseSupercellSize_rich_formationEnergy.yaxis.set_tick_params(labelsize=24)
+			axis_inverseSupercellSize_rich_formationEnergy.xaxis.set_tick_params(labelsize=24)
+
+			axis_inverseSupercellSize_rich_formationEnergy.legend(fontsize=24)
+			if formation_energies[0].leanrich_species_name == "placeholder name":
+				fig_inverseSupercellSize_rich_formationEnergy.savefig('corrected_inverseSupercellSize_formationEnergy', bbox_inches='tight')
+			else:
+				fig_inverseSupercellSize_rich_formationEnergy.savefig(f'corrected_inverseSupercellSize_{formation_energies[0].leanrich_species_name}_rich_formationEnergy', bbox_inches='tight')
+			
+			# LEAN GRAPH
+			if formation_energies[0].leanrich_species_name != "placeholder name":
+				corrected_formation_energies_lean_eV = [formation_energy.corrected_lean_eV for formation_energy in formation_energies if formation_energy.correction_eV != 0.0]
+				fig_inverseSupercellSize_lean_formationEnergy, axis_inverseSupercellSize_lean_formationEnergy = plt.subplots(figsize=(12,10)) # values are in inches, default is 6.4,4.8
+				axis_inverseSupercellSize_lean_formationEnergy.scatter(corrected_inverse_supercell_sizes, corrected_formation_energies_lean_eV, color="#1f77b4", marker='x', s=140)
+				
+				# Add regression line
+				if m_lean_corrected and c_lean_corrected:
+					axis_inverseSupercellSize_lean_formationEnergy.plot(corrected_inverse_supercell_sizes, m_lean_corrected * np.array(corrected_inverse_supercell_sizes) + c_lean_corrected, color='black', label=f'Linear Regression\n$y$ = {m_lean_corrected:.4f}$x$ + {c_lean_corrected:.4f} eV')
+				
+				axis_inverseSupercellSize_lean_formationEnergy.set_xlabel('Inverse of supercell dimension, 1/n', fontsize=24)
+				axis_inverseSupercellSize_lean_formationEnergy.set_ylabel('Corrected Formation Energy (eV)', fontsize=24)
+				axis_inverseSupercellSize_lean_formationEnergy.yaxis.set_tick_params(labelsize=24)
+				axis_inverseSupercellSize_lean_formationEnergy.xaxis.set_tick_params(labelsize=24)
+
+				axis_inverseSupercellSize_lean_formationEnergy.legend(fontsize=24)
+				fig_inverseSupercellSize_lean_formationEnergy.savefig(f'corrected_inverseSupercellSize_{formation_energies[0].leanrich_species_name}_lean_formationEnergy', bbox_inches='tight')
 
 parser = argparse.ArgumentParser(description="Calculate formation energy of the defect in the pwd.")
 parser.add_argument("--pristine_directories_path", "-pristinePath", type=str, default=None,
-                    help="=Specify the path to the directory where the different pristine cell size directories are held. If left blank, the default calculation will be located.")
+					help="=Specify the path to the directory where the different pristine cell size directories are held. If left blank, the default calculation will be located.")
 parser.add_argument("--electron_chemical_potential_relative_to_VBM_eV", "-mu_e", type=float, default=0.0,
-                    help="=Specify the electron chemical potential for calculation of charged defect formation energies relative to the pristine valence band maximum. Units eV.")
+					help="=Specify the electron chemical potential for calculation of charged defect formation energies relative to the pristine valence band maximum. Units eV.")
 parser.add_argument("dirs",nargs="*",
-                    help="List of directory paths (optional).")
+					help="List of directory paths (optional).")
+parser.add_argument("--include_FNV_correction", "-FNVCorrection", action="store_true", default=False,
+					help="Include a calculation of the FNV correction using sxdefectalign2d. Note that the command for sxdefectalign2d must be determined a-priori and placed in a file named 'command' in the optimisation directory, surrounded by begin{final_command} and end{final_command}.")
 
 
 args = parser.parse_args()
@@ -374,6 +477,10 @@ for defective_supercell_relative_directory in defective_supercell_relative_direc
 			species_contribution_lean_eV += imbalanced_species.chemical_potential_lean_eV * imbalanced_species.count
 	formation_energy.lean_eV = defective_energy_eV - pristine_energy_eV - species_contribution_lean_eV + electronic_contribution_eV
 	
+	if args.include_FNV_correction:
+		formation_energy = calculate_correction(defective_supercell_relative_directory, formation_energy)
+		formation_energy.calculate_corrected_formation_energies()
+	
 	formation_energies.append(formation_energy)
 
 if len(formation_energies) > 1:
@@ -383,9 +490,20 @@ if len(formation_energies) > 1:
 	m_rich, c_rich = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.rich_eV for formation_energy in formation_energies], 1) 
 	m_lean, c_lean = np.polyfit([formation_energy.inverse_supercell_size for formation_energy in formation_energies], [formation_energy.lean_eV for formation_energy in formation_energies], 1)
 else:
-	m_rich, c_rich, m_lean, c_lean = None, None, None, None
+	m_rich, c_rich, m_lean, c_lean,  = None, None, None, None
+
+if args.include_FNV_correction:
+	corrected_inverse_supercell_sizes = [formation_energy.inverse_supercell_size for formation_energy in formation_energies if formation_energy.correction_eV != 0.0]
+	if len(corrected_inverse_supercell_sizes) > 1: # only fit linear if there are several data
+		m_rich_corrected, c_rich_corrected = np.polyfit(corrected_inverse_supercell_sizes, [formation_energy.corrected_rich_eV for formation_energy in formation_energies if formation_energy.correction_eV != 0.0], 1) 
+		m_lean_corrected, c_lean_corrected = np.polyfit(corrected_inverse_supercell_sizes, [formation_energy.corrected_lean_eV for formation_energy in formation_energies if formation_energy.correction_eV != 0.0], 1)
+	else:
+		m_rich_corrected, c_rich_corrected, m_lean_corrected, c_lean_corrected = None, None, None, None
+else:
+	m_rich_corrected, c_rich_corrected, m_lean_corrected, c_lean_corrected = None, None, None, None
 
 formation_energies.sort(key=lambda formation_energy: formation_energy.supercell_size)
-write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, defective_net_charge, args.electron_chemical_potential_relative_to_VBM_eV)
-plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean)
+write_to_data_file(formation_energies, imbalanced_species_list, pristine_species_for_lean_calculation_list, c_rich, c_lean, c_rich_corrected, c_lean_corrected, defective_net_charge, args.electron_chemical_potential_relative_to_VBM_eV, args.include_FNV_correction)
+if len(defective_supercell_relative_directories) > 1: # only plot a graph if there are multiple data
+	plot_graph(formation_energies, m_rich, m_lean, c_rich, c_lean, m_rich_corrected, m_lean_corrected, c_rich_corrected, c_lean_corrected, args.include_FNV_correction)
 
